@@ -167,39 +167,44 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    let active = true;
+  
+useEffect(() => {
+  let active = true;
 
-    async function loadProfile() {
-      if (!supabase || !session?.user) {
-        setProfile(null);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-
-      const { data, error } = await supabase.from("profiles")
-        .select("id, full_name, role")
-        .eq("id", session.user.id)
-        .single();
-
-      if (!active) return;
-
-      if (error) {
-        setError("Não foi possível carregar seu perfil. Confira o cadastro na tabela profiles.");
-      }
-
-      setProfile(data || null);
+  async function loadProfile() {
+    if (!supabase || !session?.user?.id) {
+      setProfile(null);
       setLoading(false);
+      return;
     }
 
-    loadProfile();
+    const userId = session.user.id;
 
-    return () => {
-      active = false;
-    };
-  }, [session]);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, role")
+      .eq("id", userId)
+      .single();
+
+    if (!active) return;
+
+    if (error) {
+      setError(
+        "Não foi possível carregar seu perfil. Confira o cadastro na tabela profiles."
+      );
+    }
+
+    setProfile(data || null);
+    setLoading(false);
+  }
+
+  loadProfile();
+
+  return () => {
+    active = false;
+  };
+}, [session?.user?.id]);
+
 
   async function signOut() {
     await supabase.auth.signOut();
