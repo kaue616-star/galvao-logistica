@@ -15,7 +15,7 @@ async function toJpeg(file) {
   try {
     image = await createImageBitmap(file);
 
-    const max = 2000;
+    const max = 3000;
     const scale = Math.min(1, max / Math.max(image.width, image.height));
 
     const canvas = document.createElement("canvas");
@@ -28,7 +28,7 @@ async function toJpeg(file) {
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
     const blob = await new Promise((resolve) => {
-      canvas.toBlob(resolve, "image/jpeg", 0.88);
+      canvas.toBlob(resolve, "image/jpeg", 0.92);
     });
 
     if (!blob) {
@@ -238,7 +238,8 @@ function Login({ error, onError }) {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: window.location.origin
       });
-            if (error) throw error;
+
+      if (error) throw error;
 
       setMessage("Enviamos um link de recuperação para seu e-mail. Confira também o spam.");
     } catch (err) {
@@ -317,132 +318,14 @@ function DriverUpload({ user, setError, setNotice }) {
   const [protocol, setProtocol] = useState("");
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [cameraOpen, setCameraOpen] = useState(false);
-  const [cameraStream, setCameraStream] = useState(null);
 
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
 
-  useEffect(() => {
-    if (cameraOpen && cameraStream && videoRef.current) {
-      videoRef.current.srcObject = cameraStream;
-      videoRef.current.play().catch(() => {});
-    }
-  }, [cameraOpen, cameraStream]);
-
-  function stopCamera() {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach((track) => track.stop());
-    }
-
-    setCameraStream(null);
-    setCameraOpen(false);
-  }
-
-  useEffect(() => {
-    return () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach((track) => track.stop());
-      }
-    };
-  }, [cameraStream]);
-
-    async function openCamera() {
+  function openCamera() {
     setError("");
     setNotice("");
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError("Seu navegador não permite abrir a câmera nesta página. Confira se está usando o Chrome e se o endereço começa com https://.");
-      return;
-    }
-
-    let stream = null;
-
-    try {
-      // Solicita uma imagem de maior resolução, sem obrigar
-      // o celular a usar um formato que ele não suporte.
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30, max: 30 }
-        },
-        audio: false
-      });
-
-      // Tenta ativar o foco contínuo, se o aparelho oferecer suporte.
-      const track = stream.getVideoTracks()[0];
-
-      if (track && typeof track.getCapabilities === "function") {
-        const capabilities = track.getCapabilities();
-
-        if (
-          Array.isArray(capabilities.focusMode) &&
-          capabilities.focusMode.includes("continuous")
-        ) {
-          try {
-            await track.applyConstraints({
-              advanced: [{ focusMode: "continuous" }]
-            });
-          } catch (focusError) {
-            // Se o foco contínuo não funcionar, mantém a câmera aberta.
-          }
-        }
-      }
-
-      setCameraStream(stream);
-      setCameraOpen(true);
-
-    } catch (err) {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-
-      setError(err.name === "NotAllowedError"
-        ? "Acesso à câmera não permitido. Autorize a câmera nas configurações do Chrome."
-        : "Não foi possível abrir a câmera. Confira a permissão e tente novamente.");
-    }
-  }
-
-  function takePhoto() {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-
-    if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
-      setError("A câmera ainda está carregando. Aguarde um instante e tente novamente.");
-      return;
-    }
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    const context = canvas.getContext("2d");
-
-    if (!context) {
-      setError("Não foi possível capturar a imagem. Tente novamente.");
-      return;
-    }
-
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        setError("Não foi possível preparar a foto. Tente novamente.");
-        return;
-      }
-
-      const capturedFile = new File([blob], `comprovante-${Date.now()}.jpg`, {
-        type: "image/jpeg",
-        lastModified: Date.now()
-      });
-
-      setPhoto(capturedFile);
-      setError("");
-      stopCamera();
-    }, "image/jpeg", 0.92);
+    cameraInputRef.current?.click();
   }
 
   async function submit(e) {
@@ -496,7 +379,10 @@ function DriverUpload({ user, setError, setNotice }) {
 
   function handlePhotoChange(e) {
     const selected = e.target.files?.[0] || null;
-    if (selected) setPhoto(selected);
+    if (selected) {
+      setPhoto(selected);
+      setError("");
+    }
   }
 
   return <section className="panel narrow">
@@ -518,14 +404,23 @@ function DriverUpload({ user, setError, setNotice }) {
         <label>Foto do comprovante</label>
 
         <div className="actions">
-          <button type="button" className="button primary" disabled={busy || cameraOpen} onClick={openCamera}>
+          <button type="button" className="button primary" disabled={busy} onClick={openCamera}>
             Abrir câmera
           </button>
 
-          <button type="button" className="button ghost" disabled={busy || cameraOpen} onClick={() => galleryInputRef.current?.click()}>
+          <button type="button" className="button ghost" disabled={busy} onClick={() => galleryInputRef.current?.click()}>
             Escolher da galeria
           </button>
         </div>
+
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handlePhotoChange}
+          style={{ display: "none" }}
+        />
 
         <input
           ref={galleryInputRef}
@@ -535,34 +430,12 @@ function DriverUpload({ user, setError, setNotice }) {
           style={{ display: "none" }}
         />
 
-        {cameraOpen && <div style={{ marginTop: 12 }}>
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            style={{ width: "100%", maxHeight: 420, background: "#111", borderRadius: 10, objectFit: "contain" }}
-          />
-
-          <canvas ref={canvasRef} style={{ display: "none" }} />
-
-          <div className="actions" style={{ marginTop: 10 }}>
-            <button type="button" className="button primary" onClick={takePhoto}>
-              Tirar foto
-            </button>
-
-            <button type="button" className="button ghost" onClick={stopCamera}>
-              Cancelar câmera
-            </button>
-          </div>
-        </div>}
-
         <small>A imagem será armazenada em JPEG.</small>
       </div>
 
       {photo && <p className="muted">Foto selecionada: {photo.name}</p>}
 
-      <button className="button primary" disabled={busy || cameraOpen}>
+      <button className="button primary" disabled={busy}>
         {busy ? "Enviando foto..." : "Enviar comprovante"}
       </button>
     </form>
