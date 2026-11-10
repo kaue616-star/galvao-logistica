@@ -15,7 +15,7 @@ async function toJpeg(file) {
   try {
     image = await createImageBitmap(file);
 
-    const max = 1600;
+    const max = 2000;
     const scale = Math.min(1, max / Math.max(image.width, image.height));
 
     const canvas = document.createElement("canvas");
@@ -28,7 +28,7 @@ async function toJpeg(file) {
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
     const blob = await new Promise((resolve) => {
-      canvas.toBlob(resolve, "image/jpeg", 0.78);
+      canvas.toBlob(resolve, "image/jpeg", 0.88);
     });
 
     if (!blob) {
@@ -238,8 +238,7 @@ function Login({ error, onError }) {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: window.location.origin
       });
-
-      if (error) throw error;
+            if (error) throw error;
 
       setMessage("Enviamos um link de recuperação para seu e-mail. Confira também o spam.");
     } catch (err) {
@@ -762,8 +761,7 @@ function AdminDashboard({ setError, setNotice }) {
         </div>
       )}
     </div>
-
-    {preview && (
+        {preview && (
       <div className="modal" onClick={() => setPreview(null)}>
         <div className="modalCard" onClick={e => e.stopPropagation()}>
           <div className="listHead">
