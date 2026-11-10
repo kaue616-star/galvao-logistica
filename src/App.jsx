@@ -629,14 +629,12 @@ function DriverUpload({ user, setError, setNotice }) {
           </div>
 
           <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handlePhotoChange}
-            style={{ display: "none" }}
-          />
-
+  ref={cameraInputRef}
+  type="file"
+  accept="image/*"
+  onChange={handlePhotoChange}
+  style={{ display: "none" }}
+/>
           <input
             ref={galleryInputRef}
             type="file"
