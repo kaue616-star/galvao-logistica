@@ -349,7 +349,7 @@ function DriverUpload({ user, setError, setNotice }) {
     };
   }, [cameraStream]);
 
-  async function openCamera() {
+    async function openCamera() {
     setError("");
     setNotice("");
 
@@ -358,15 +358,49 @@ function DriverUpload({ user, setError, setNotice }) {
       return;
     }
 
+    let stream = null;
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+      // Solicita uma imagem de maior resolução, sem obrigar
+      // o celular a usar um formato que ele não suporte.
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30, max: 30 }
+        },
         audio: false
       });
 
+      // Tenta ativar o foco contínuo, se o aparelho oferecer suporte.
+      const track = stream.getVideoTracks()[0];
+
+      if (track && typeof track.getCapabilities === "function") {
+        const capabilities = track.getCapabilities();
+
+        if (
+          Array.isArray(capabilities.focusMode) &&
+          capabilities.focusMode.includes("continuous")
+        ) {
+          try {
+            await track.applyConstraints({
+              advanced: [{ focusMode: "continuous" }]
+            });
+          } catch (focusError) {
+            // Se o foco contínuo não funcionar, mantém a câmera aberta.
+          }
+        }
+      }
+
       setCameraStream(stream);
       setCameraOpen(true);
+
     } catch (err) {
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+
       setError(err.name === "NotAllowedError"
         ? "Acesso à câmera não permitido. Autorize a câmera nas configurações do Chrome."
         : "Não foi possível abrir a câmera. Confira a permissão e tente novamente.");
