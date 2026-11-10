@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabase.js";
 
 const brDate = (value) => new Date(value).toLocaleString("pt-BR", {
@@ -15,7 +15,7 @@ async function toJpeg(file) {
 
   try {
     image = await createImageBitmap(file);
-    
+
     const max = 1600;
     const scale = Math.min(1, max / Math.max(image.width, image.height));
 
@@ -211,13 +211,17 @@ function Login({ error, onError }) {
     {mode === "register" && <p className="muted tiny">O cadastro cria somente um acesso de motoboy. A função de administrador não pode ser escolhida nesta tela.</p>}
   </form></main>;
 }
+
 function DriverUpload({ user, setError, setNotice }) {
   const [protocol, setProtocol] = useState("");
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
+  const cameraInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
+
   async function submit(e) {
     e.preventDefault(); setError(""); setNotice("");
-    if (!photo) return setError("Escolha ou tire uma foto do comprovante.");
+    if (!photo) return setError("Tire uma foto ou escolha uma imagem da galeria.");
     setBusy(true);
     try {
       const jpeg = await toJpeg(photo);
@@ -236,22 +240,57 @@ function DriverUpload({ user, setError, setNotice }) {
       }
       setProtocol(""); setPhoto(null);
       e.target.reset();
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      if (galleryInputRef.current) galleryInputRef.current.value = "";
       setNotice("Comprovante enviado com sucesso!");
     } catch (err) {
       setError(err.message || "Não foi possível enviar o comprovante.");
     } finally { setBusy(false); }
   }
+
+  function handlePhotoChange(e) {
+    const selected = e.target.files?.[0] || null;
+    if (selected) setPhoto(selected);
+  }
+
   return <section className="panel narrow">
     <div className="sectionTitle"><div><span className="eyebrow">ÁREA DO MOTOBOY</span><h1>Enviar comprovante</h1></div><span className="pill">Novo envio</span></div>
     <form onSubmit={submit} className="form">
       <label>Número do protocolo<input required value={protocol} onChange={e=>setProtocol(e.target.value)} placeholder="Digite o protocolo"/></label>
-      <label>Foto do comprovante<input required type="file" accept="image/*" onChange={e=>setPhoto(e.target.files?.[0] || null)}/><small>A imagem será armazenada em JPEG.</small></label>
+      <div>
+        <label>Foto do comprovante</label>
+        <div className="actions">
+          <button type="button" className="button primary" disabled={busy} onClick={() => cameraInputRef.current?.click()}>
+            Abrir câmera
+          </button>
+          <button type="button" className="button ghost" disabled={busy} onClick={() => galleryInputRef.current?.click()}>
+            Escolher da galeria
+          </button>
+        </div>
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handlePhotoChange}
+          style={{ display: "none" }}
+        />
+        <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handlePhotoChange}
+          style={{ display: "none" }}
+        />
+        <small>A imagem será armazenada em JPEG.</small>
+      </div>
       {photo && <p className="muted">Arquivo selecionado: {photo.name}</p>}
       <button className="button primary" disabled={busy}>{busy ? "Enviando foto..." : "Enviar comprovante"}</button>
     </form>
     <p className="muted tiny">A data e o horário são registrados automaticamente pelo sistema.</p>
   </section>;
 }
+
 function AdminDashboard({ setError, setNotice }) {
   const [rows, setRows] = useState([]);
   const [filter, setFilter] = useState("all");
@@ -274,11 +313,14 @@ function AdminDashboard({ setError, setNotice }) {
     if (error) setError("Não foi possível carregar os comprovantes.");
     setRows(data || []); setBusy(false);
   }
+
   useEffect(() => { load(); }, [day]);
+
   const filtered = useMemo(() => rows.filter(r => {
     const statusOk = filter === "all" || (filter === "pending" ? !r.downloaded_at : !!r.downloaded_at);
     return statusOk && r.protocol.toLowerCase().includes(search.toLowerCase());
   }), [rows, filter, search]);
+
   const pending = rows.filter(r=>!r.downloaded_at).length;
   const downloaded = rows.length - pending;
 
@@ -288,6 +330,7 @@ function AdminDashboard({ setError, setNotice }) {
     if (error) return setError("Não foi possível abrir a imagem.");
     setPreview({ ...row, url: data.signedUrl });
   }
+
   async function downloadReceipt(row) {
     setError(""); setNotice("");
     const { data, error } = await supabase.storage.from("comprovantes").download(row.storage_path);
@@ -304,11 +347,14 @@ function AdminDashboard({ setError, setNotice }) {
     }
     setNotice(`Protocolo ${row.protocol} baixado.`);
   }
+
   async function markPending(row) {
     const { error } = await supabase.from("receipts").update({ downloaded_at: null }).eq("id", row.id);
     if (error) return setError("Não foi possível alterar o status.");
-    setNotice(`Protocolo ${row.protocol} voltou para pendente.`); await load();
+    setNotice(`Protocolo ${row.protocol} voltou para pendente.`);
+    await load();
   }
+
   return <section className="admin">
     <div className="sectionTitle"><div><span className="eyebrow">PAINEL ADMINISTRATIVO</span><h1>Comprovantes</h1></div><button className="button ghost" onClick={load}>Atualizar</button></div>
     <div className="stats">
