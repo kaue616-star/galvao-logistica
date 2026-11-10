@@ -5,19 +5,43 @@ const brDate = (value) => new Date(value).toLocaleString("pt-BR", {
   timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short"
 });
 
+
 async function toJpeg(file) {
-  if (!file || !file.type.startsWith("image/")) throw new Error("Selecione uma imagem.");
-  const image = await createImageBitmap(file);
-  const max = 2400;
-  const scale = Math.min(1, max / Math.max(image.width, image.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(image.width * scale);
-  canvas.height = Math.round(image.height * scale);
-  canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.88));
-  if (!blob) throw new Error("Não foi possível converter a foto para JPEG.");
-  return blob;
+  if (!file || !file.type.startsWith("image/")) {
+    throw new Error("Selecione uma imagem.");
+  }
+
+  let image;
+
+  try {
+    image = await createImageBitmap(file);
+    
+    const max = 1600;
+    const scale = Math.min(1, max / Math.max(image.width, image.height));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(image.width * scale);
+    canvas.height = Math.round(image.height * scale);
+
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Não foi possível processar a foto.");
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.78);
+    });
+
+    if (!blob) {
+      throw new Error("Não foi possível comprimir a foto.");
+    }
+
+    return blob;
+  } finally {
+    if (image) image.close();
+  }
 }
+
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -27,15 +51,35 @@ export default function App() {
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    return () => listener.subscription.unsubscribe();
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
+    let mounted = true;
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
+      if (error) setError(error.message);
+      setSession(data?.session ?? null);
+      setLoading(false);
+    }).catch((err) => {
+      if (mounted) {
+        setError(err.message || "Não foi possível conectar ao Supabase.");
+        setLoading(false);
+      }
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
+      if (mounted) setSession(next);
+    });
+    return () => {
+      mounted = false;
+      listener?.subscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
     let active = true;
     async function loadProfile() {
-      if (!session?.user) { setProfile(null); setLoading(false); return; }
+      if (!supabase || !session?.user) { setProfile(null); setLoading(false); return; }
       setLoading(true);
       const { data, error } = await supabase.from("profiles")
         .select("id, full_name, role").eq("id", session.user.id).single();
@@ -79,7 +123,9 @@ function Header({ email, name, onSignOut }) {
   return <header className="topbar"><Brand/><div className="account"><span>{name || email}</span><button className="button ghost" onClick={onSignOut}>Sair</button></div></header>;
 }
 function Login({ error, onError }) {
+  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [recovering, setRecovering] = useState(false);
@@ -89,11 +135,30 @@ function Login({ error, onError }) {
     e.preventDefault();
     onError("");
     setMessage("");
-    setRecovering(false);
     setBusy(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) onError("E-mail ou senha inválidos. Confira os dados e tente novamente.");
+      if (mode === "register") {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { full_name: fullName.trim() } }
+        });
+        if (error) throw error;
+        if (data.session) {
+          setMessage("Cadastro realizado! Seu acesso de motoboy já está ativo.");
+        } else {
+          setMessage("Cadastro recebido! Confira seu e-mail para confirmar a conta e depois entre no sistema.");
+          setMode("login");
+          setPassword("");
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (error) throw error;
+      }
+    } catch (err) {
+      onError(mode === "register"
+        ? (err.message || "Não foi possível realizar o cadastro.")
+        : "E-mail ou senha inválidos. Confira os dados e tente novamente.");
     } finally {
       setBusy(false);
     }
@@ -104,21 +169,18 @@ function Login({ error, onError }) {
       onError("Digite seu e-mail primeiro.");
       return;
     }
-
     setBusy(true);
     setRecovering(true);
     onError("");
     setMessage("");
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: window.location.origin
       });
-
-      if (error) {
-        onError(error.message);
-      } else {
-        setMessage("Enviamos um link de recuperação para seu e-mail. Confira também o spam.");
-      }
+      if (error) throw error;
+      setMessage("Enviamos um link de recuperação para seu e-mail. Confira também o spam.");
+    } catch (err) {
+      onError(err.message || "Não foi possível enviar o link de recuperação.");
     } finally {
       setBusy(false);
       setRecovering(false);
@@ -126,15 +188,27 @@ function Login({ error, onError }) {
   }
 
   return <main className="center"><form className="panel login" onSubmit={submit}>
-    <Brand/><h1>Acessar sistema</h1><p className="muted">Entre com seu usuário autorizado.</p>
-    <label>E-mail<input type="email" autoComplete="username" required value={email} onChange={e=>setEmail(e.target.value)}/></label>
-    <label>Senha<input type="password" autoComplete="current-password" required value={password} onChange={e=>setPassword(e.target.value)}/></label>
+    <Brand/>
+    <div className="authTabs">
+      <button type="button" className={mode === "login" ? "active" : ""} onClick={() => {setMode("login");onError("");setMessage("");}}>Entrar</button>
+      <button type="button" className={mode === "register" ? "active" : ""} onClick={() => {setMode("register");onError("");setMessage("");}}>Cadastro de motoboy</button>
+    </div>
+    <h1>{mode === "register" ? "Cadastre-se como motoboy" : "Acessar sistema"}</h1>
+    <p className="muted">{mode === "register" ? "Preencha seus dados para criar seu acesso." : "Entre com seu usuário autorizado."}</p>
+    {mode === "register" && <label>Nome completo<input required autoComplete="name" maxLength={120} value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Seu nome completo"/></label>}
+    <label>E-mail<input type="email" autoComplete="username" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="seu@email.com"/></label>
+    <label>Senha<input type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} minLength={6} required value={password} onChange={e=>setPassword(e.target.value)} placeholder={mode === "register" ? "Mínimo de 6 caracteres" : "Sua senha"}/></label>
     {error && <p className="error">{error}</p>}
     {message && <p className="success">{message}</p>}
-    <button className="button primary" disabled={busy}>{busy ? "Aguarde..." : "Entrar"}</button>
-    <button type="button" className="button ghost" disabled={busy} onClick={recoverPassword}>
-      {recovering ? "Enviando link..." : "Esqueci minha senha"}
-    </button>
+    <button className="button primary" disabled={busy}>{busy ? "Aguarde..." : mode === "register" ? "Criar cadastro de motoboy" : "Entrar"}</button>
+    {mode === "login" && <>
+      <button type="button" className="button ghost" disabled={busy} onClick={recoverPassword}>{recovering ? "Enviando link..." : "Esqueci minha senha"}</button>
+      <div className="registerCallout">
+        <span>É motoboy e ainda não tem acesso?</span>
+        <button type="button" disabled={busy} onClick={() => {setMode("register");onError("");setMessage("");}}>Cadastrar como motoboy</button>
+      </div>
+    </>}
+    {mode === "register" && <p className="muted tiny">O cadastro cria somente um acesso de motoboy. A função de administrador não pode ser escolhida nesta tela.</p>}
   </form></main>;
 }
 function DriverUpload({ user, setError, setNotice }) {
@@ -171,7 +245,7 @@ function DriverUpload({ user, setError, setNotice }) {
     <div className="sectionTitle"><div><span className="eyebrow">ÁREA DO MOTOBOY</span><h1>Enviar comprovante</h1></div><span className="pill">Novo envio</span></div>
     <form onSubmit={submit} className="form">
       <label>Número do protocolo<input required value={protocol} onChange={e=>setProtocol(e.target.value)} placeholder="Digite o protocolo"/></label>
-      <label>Foto do comprovante<input required type="file" accept="image/*" capture="environment" onChange={e=>setPhoto(e.target.files?.[0] || null)}/><small>A imagem será armazenada em JPEG.</small></label>
+      <label>Foto do comprovante<input required type="file" accept="image/*" onChange={e=>setPhoto(e.target.files?.[0] || null)}/><small>A imagem será armazenada em JPEG.</small></label>
       {photo && <p className="muted">Arquivo selecionado: {photo.name}</p>}
       <button className="button primary" disabled={busy}>{busy ? "Enviando foto..." : "Enviar comprovante"}</button>
     </form>
