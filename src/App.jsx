@@ -103,7 +103,7 @@ async function toJpeg(file) {
       return file;
     }
 
-    const max = 3000;
+    const max = 2000;
     const scale = Math.min(1, max / Math.max(image.width, image.height));
 
     const canvas = document.createElement("canvas");
@@ -118,7 +118,7 @@ async function toJpeg(file) {
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
     const blob = await new Promise((resolve) => {
-      canvas.toBlob(resolve, "image/jpeg", 0.92);
+      canvas.toBlob(resolve, "image/jpeg", 0.88);
     });
 
     if (!blob) {
